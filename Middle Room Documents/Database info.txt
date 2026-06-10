@@ -1,0 +1,197 @@
+Parity Database Location:
+	- IP: 192.168.0.10
+
+
+Table Name: 	BVW-ICTransaction_H --------------------------------- For all transactions
+		BVW-BTLotItem --------------------------------------- For all items that is produced out
+		CVW-ICShipmentTransfer ------------------------------ For Reciepts with products
+		BVW-BTItemLotHold ----------------------------------- For all holds history
+		BTProduction_H -------------------------------------- Archieved Production Runs
+		BTProduction_T -------------------------------------- Open Productions Runs
+		BTMobile_LookupLocation_ItemByLotLocation ----------- All items in each area
+		BTMobile_* ------------------------------------------ Parity Mobile features in general
+		BTCycleCount_T -------------------------------------- Current Open Cycle Count Tab ( Pack & Ship -> Transaction -> Cycle Counts)
+		|
+		|------ links to BTCycleCountLocation_T by attribute (BTCycleCount_TSK)
+		PXUser ---------------------------------------------- Parity Office + Mobile User can skip this / this table is useless
+		SecuritySystemUser----------------------------------- Actual user Database with password ( Hashed)
+		SecuritySystemUserUsers_SecuritySystemRoleRoles ----- User Roles table  --------- Roles being assigned to users (Join table)
+		SecuritySystemRole----------------------------------- Actual Role Database
+		BTAttachment_H -------------------------------------- Attachment for Archived/ Closed Production Runs
+		BTAttachment_T -------------------------------------- Attachment for Open Production Runs
+		BTProductionProduct --------------------------------- List Of Producable Item ( Produce Tab from a production run)
+		BTProductionProductItem ----------------------------- List Of items produced out ( Production Event tab from a production run)
+		BTProductionIssue ----------------------------------- List Of Issuable Item ( Issue Tab from a production run)
+									|
+									|-------------> If user issue something that is not in the list. the 
+											item will be added automatically
+		BTProductionIssueItemlot ----------------------------- List Of items Issued in ( Issue Event tab from a production run)
+		ICProduct -------------------------------------------- List Of Product (Equivalent to product Under Masterfile)
+		ICProduction_H --------------------------------------- List Of Production (Open and Archived combine but only used 
+		BTItem ----------------------------------------------- List Of Produced out items
+			|
+			|
+			|-- BTItemStatusSK
+				+ 00000000-0000-0000-0000-000000000000		: Unknown
+				+ 00000000-0000-0000-0000-000000000001		: Available
+				+ 00000000-0000-0000-0000-000000000002		: Creating
+				+ 00000000-0000-0000-0000-000000000003		: Loaded
+				+ 00000000-0000-0000-0000-000000000004		: Shipped
+				+ 00000000-0000-0000-0000-000000000005		: Packed
+				+ 00000000-0000-0000-0000-000000000006		: Adjusting
+				+ 00000000-0000-0000-0000-000000000007		: Destroyed
+				+ 00000000-0000-0000-0000-000000000008		: Issued
+				+ 00000000-0000-0000-0000-000000000009		: Allocated
+				+ 00000000-0000-0000-0000-00000000000A		: Intransit
+				+ 00000000-0000-0000-0000-00000000000B		: Staged
+		BTPrintHistory --------------------------------------- Printing history of the ticket
+		ICLotAttribute09 ----------------------------------- List Of customer being set in the master file
+		
+Attribute:
+	PrinterSK:
+		+ 9AC4 - Zebra Halves
+		+ A48A - Zebra Cracking (LMC)
+		+ 769F - Zebra Picking
+		+ 8E198 - Zebra Weigh Pack
+		+ 863E64A - CRACKING printer
+
+	
+	PXWorkflow:
+		+ A754AB9D-9A6D-E811-80B9-00155D657602- Finished Goods
+		+ A354AB9D-9A6D-E811-80B9-00155D657602 - WIP
+		+ AB54AB9D-9A6D-E811-80B9-00155D657602 - Cracking
+	
+	ICFacilitySK:
+		+ 6D2A5F5B-0413-4AEE-BE90-AEF5B89AF9FB - SGP-Levi
+
+
+address: 192.168.0.10
+database: PDB_Parity4_SGP
+Advanced --- Run SQL query
+
+Gaining Admin access
+INSERT INTO dbo.SecuritySystemUserUsers_SecuritySystemRoleRoles (Roles, Users, OptimisticLockField)
+VALUES ('2B4DEB68-D326-4AA1-981F-C8FECEFCE99B', 'BD60B761-B6CF-45BE-B992-BF63C51AB73C', 0)
+************************************************************************************
+Deleting Items that is not being used in produce tickets ------------------------- CLAUSE 1
+DELETE a
+FROM dbo.BTProductionProduct_T AS a
+LEFT JOIN dbo.BTProductionProductItem_T AS b
+ON a.BTProductionProduct_TSK = b.BTProductionProduct_TSK
+WHERE a.BTProduction_TSK = 'E83593B9-F030-F011-81C7-00155D657609'
+  AND b.BTProductionProduct_TSK IS NULL
+********************************************************************************
+Getting ID of a Parity Production Run ---------------------- CLAUSE 2
+Select BTProduction_TSK, ProductionID, ScheduledStartDateTime,ScheduledEndDateTime
+from dbo.BTProduction_T
+where ProductionID = [Lookup PR here]
+***********************************************************************************
+Combining clause 1 and clause 2 together, we got
+
+DELETE a
+FROM dbo.BTProductionProduct_T AS a
+LEFT JOIN dbo.BTProductionProductItem_T AS b
+  ON a.BTProductionProduct_TSK = b.BTProductionProduct_TSK
+WHERE a.BTProduction_TSK = (
+    SELECT BTProduction_TSK
+    FROM dbo.BTProduction_T
+    WHERE ProductionID = 'YourPRNumberHere'
+)
+AND b.BTProductionProduct_TSK IS NULL;
+*********************************************************************************
+Same Senario as above but for issue
+
+DELETE a
+FROM dbo.BTProductionIssue_T AS a
+LEFT JOIN dbo.BTProductionIssueItemLot_T AS b
+  ON a.BTProductionIssue_TSK = b.BTProductionIssue_TSK
+WHERE a.BTProduction_TSK = (
+    SELECT BTProduction_TSK
+    FROM dbo.BTProduction_T
+    WHERE ProductionID = 'YourPRNumberHere'
+)
+AND b.BTProductionIssue_TSK IS NULL;
+-----------------------------------------------------------------------------------------------------------
+Reverse Issued on a ticket that is needed to destroy
+
+Scenario: 
+Lets say a ticket is made incorrectly for example 000001129622 was made 17,170 lbs and we accidently issued this in while checking the PR
+------- At this point, since there is an issue event after its creation, we wont be able to go back and unproduce this ticket.
+
+FIX: 
+In order to make the unproduce option for this ticket to available again, we will need to remove any transaction after its creation
+ICTransaction_H: will have the ID of the transaction under the name ICTransaction_HSK ( should the the first column in the table) and column called reference is the tracking number
+
+After we go the ID that we need, we will delete the same ID in 
+BTEventLog table. 
+
+Related Tables: ICTransaction_H, BTEventLog
+
+Sample SQL queries: delete from dbo.BTEventLog where ICTransaction_HSK = '38f146f6-e442-f011-81d1-00155d65760f' OR  ICTransaction_HSK = 'BC67B701-9735-F011-81C7-00155D657609'
+
+NOTE: If removing in the EventLog is good enough already, then the removed transaction will not show up. If you want to fully clean the data, you will need to remove the same thing from ICTransaction_H, but the removal from EventLog has to go first.
+
+NOTE: Removing from EventLog will take out the event/transaction of the event that we dont want of the ticket; However, this will not take off the event that is in the production run ( issue/unissue). In order to take out this, the transaction of this is stored in BTProductionIssueItemlot
+
+*********************************************************************************
+Scenario:
+When Cloning from an existing PR that is already trimmed, it will miss a lot of items under produce tab (because it is already trimmed). This SQL below will insert the missing item, and using the templaste as source to indicate what item is needed to re-insert
+
+INSERT INTO dbo.BTProductionProduct_T (
+    BTProduction_TSK,
+    ICProductSK, 
+    BTItemTypeSK,
+    LastUpdatedBy,
+    BTLabelSK_Item, 
+    BTLabelSK_Lot, 
+    PXSiteSK,
+    Source, 
+    LotCode
+)
+SELECT 
+    target_info.BTProduction_TSK,
+    b.ICProductSK, 
+    b.BTItemTypeSK,
+    b.LastUpdatedBy, 
+    b.BTLabelSK_Item, 
+    b.BTLabelSK_Lot, 
+    b.PXSiteSK,
+    b.Source, 
+    target_info.LotCode  -- Get LotCode from target production
+FROM (
+    SELECT *
+    FROM dbo.BTProductionProduct_T
+    WHERE BTProduction_TSK = (
+        SELECT BTProduction_TSK
+        FROM dbo.BTProduction_T
+        WHERE ProductionID = 'Cloned and Trimmed PR'
+    )
+) AS a
+RIGHT JOIN (
+    SELECT *
+    FROM dbo.BTProductionProduct_T
+    WHERE BTProduction_TSK = (
+        SELECT BTProduction_TSK
+        FROM dbo.BTProduction_T
+        WHERE ProductionID = 'Template Production PR'
+    )
+) AS b ON a.ICProductSK = b.ICProductSK
+CROSS JOIN (
+    SELECT BTProduction_TSK, LotCode
+    FROM dbo.BTProduction_T  
+    WHERE ProductionID = 'Cloned and Trimmed PR'
+) AS target_info
+WHERE a.ICProductSK IS NULL;
+------------------------------------------------------------------
+Getting Printing History of a ticket
+
+Select *
+from dbo.BTItem a
+join dbo.BTPrintHistory b on a.BTItemSK = b.BTItemSK
+join dbo.BTPrinter c on c.BTPrinterSK = b.BTPrinterSK
+where a.ItemID = '000001136034'
+
+
+update dbo.ICProduction_H
+set ScheduledStartDateTime = '6/6/2025 0:00', ScheduledEndDateTime = '6/6/2025 0:00'
+where ProductionID in ('54761', '54762', '54763', '54764')
